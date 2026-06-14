@@ -1,0 +1,45 @@
+services:
+  # ============================================================
+  #  BROKER MQTT LOCAL (Mosquitto)
+  #  Recibe la telemetria del ESP8266 en la red local.
+  # ============================================================
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: dataguard-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"        # expone el puerto a la red -> el ESP8266 conecta aqui
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  # ============================================================
+  #  BRIDGE A AWS IoT Core
+  #  Se suscribe a Mosquitto y reenvia a la nube por TLS.
+  # ============================================================
+  bridge:
+    image: jzuletadev/dataguard-bridge:arm64
+    container_name: dataguard-bridge
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    environment:
+      # Alcanza a Mosquitto por el NOMBRE del servicio (red interna de compose)
+      LOCAL_BROKER: "mosquitto"
+      LOCAL_PORT: "1883"
+      LOCAL_TOPIC: "datacenter/rack/telemetria"
+      # Si Mosquitto tiene auth, descomenta:
+      # LOCAL_USER: "usuario"
+      # LOCAL_PASS: "clave"
+
+      # AWS IoT Core
+      AWS_ENDPOINT: "xxxxxxxxxxxxxx-ats.iot.us-east-1.amazonaws.com"
+      AWS_CLIENT_ID: "rack-gw-01"
+      AWS_TOPIC: "datacenter/rack/telemetria"
+    volumes:
+      - /home/why/certs:/app/certs:ro
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
