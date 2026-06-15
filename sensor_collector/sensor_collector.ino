@@ -1,19 +1,26 @@
 /*
  * ============================================================
  *  Nodo Sensor - Cuarto de Servidores (Proyecto DataGuard)
- *  ESP8266 + DHT22 + MQ-2 + LCD I2C + LEDs + Buzzer
+ *  ESP8266 + DHT22 + MQ-2 + LCD I2C + LED RGB + Buzzer
  *  Publica telemetria via MQTT a broker Mosquitto (Raspberry Pi)
  * ============================================================
  *
  *  Cableado:
  *    A0 -> MQ-2 (analogico)
- *    D0 -> DHT22 (datos)     [si da NaN, mover a D3 o D4]
+ *    D4 -> DHT22 (datos)
  *    D1 -> SCL del LCD I2C
  *    D2 -> SDA del LCD I2C
- *    D5 -> LED verde   (estado normal)
- *    D6 -> LED amarillo (advertencia)
- *    D7 -> LED rojo     (critico)
+ *    D5 -> LED RGB pata R (rojo)
+ *    D6 -> LED RGB pata G (verde)
+ *    D7 -> LED RGB pata B (azul)
+ *    GND -> LED RGB pata comun (la larga)   << CATODO COMUN
  *    D8 -> Buzzer
+ *
+ *  LED RGB CATODO COMUN: cada color se enciende con HIGH.
+ *  Colores por estado:
+ *    NORMAL      -> verde   (G)
+ *    ADVERTENCIA -> amarillo (R + G)
+ *    CRITICO     -> rojo    (R) + buzzer
  */
 
 //esp8266
@@ -41,9 +48,9 @@ const char* MQTT_USER     = "";
 const char* MQTT_PASS     = "";
 
 // --- Umbrales de alarma ---
-const float TEMP_WARN  = 26.0;   // advertencia (amarillo)
-const float TEMP_CRIT  = 30.0;   // critico (rojo + buzzer)
-const float HUM_WARN   = 70.0;   // humedad alta (advertencia)
+const float TEMP_WARN  = 28.0;   // advertencia (amarillo)
+const float TEMP_CRIT  = 32.0;   // critico (rojo + buzzer)
+const float HUM_WARN   = 80.0;   // humedad alta (advertencia)
 const int   SMOKE_WARN = 300;    // lectura cruda MQ-2 (0-1023): advertencia
 const int   SMOKE_CRIT = 450;    // critico (rojo + buzzer)
 
@@ -52,11 +59,16 @@ const unsigned long INTERVALO_MS = 15000;  // publicar cada 15 s
 
 // ===================== PINES =====================
 #define PIN_MQ2     A0
-#define PIN_DHT     D4     // si NaN, cambiar a D3 o D4
-#define PIN_LED_V   D5
-#define PIN_LED_A   D6
-#define PIN_LED_R   D7
+#define PIN_DHT     D4
+#define PIN_LED_R   D5      // LED RGB - rojo
+#define PIN_LED_G   D6      // LED RGB - verde
+#define PIN_LED_B   D7      // LED RGB - azul
 #define PIN_BUZZER  D8
+
+// LED RGB de CATODO COMUN: HIGH enciende, LOW apaga.
+// (Si fuera anodo comun, se invierte: LOW enciende.)
+#define RGB_ON   HIGH
+#define RGB_OFF  LOW
 
 #define DHTTYPE DHT22
 
@@ -69,8 +81,15 @@ LiquidCrystal_I2C* lcd = nullptr;   // se crea tras detectar la direccion I2C
 unsigned long ultimaLectura = 0;
 uint8_t lcdAddr = 0x27;             // valor por defecto; el escaner lo corrige
 
+// ===================== CONTROL DEL LED RGB =====================
+// Enciende el LED RGB con la combinacion R/G/B indicada.
+void setRGB(bool r, bool g, bool b) {
+  digitalWrite(PIN_LED_R, r ? RGB_ON : RGB_OFF);
+  digitalWrite(PIN_LED_G, g ? RGB_ON : RGB_OFF);
+  digitalWrite(PIN_LED_B, b ? RGB_ON : RGB_OFF);
+}
+
 // ===================== ESCANER I2C =====================
-// Recorre el bus I2C y devuelve la primera direccion que responde.
 uint8_t detectarLCD() {
   byte encontrada = 0;
   Serial.println(F("Escaneando bus I2C..."));
@@ -146,12 +165,22 @@ int evaluarEstado(float temp, float hum, int humo) {
   return 0;
 }
 
-// Controla LEDs y buzzer segun el estado (alarma LOCAL, independiente de la nube)
+// Controla LED RGB y buzzer segun el estado (alarma LOCAL, independiente de la nube)
 void aplicarSalidas(int estado) {
-  digitalWrite(PIN_LED_V, estado == 0);
-  digitalWrite(PIN_LED_A, estado == 1);
-  digitalWrite(PIN_LED_R, estado == 2);
-  digitalWrite(PIN_BUZZER, estado == 2 ? HIGH : LOW);  // buzzer solo en critico
+  switch (estado) {
+    case 0:  // NORMAL -> verde
+      setRGB(false, true, false);
+      digitalWrite(PIN_BUZZER, LOW);
+      break;
+    case 1:  // ADVERTENCIA -> amarillo (rojo + verde)
+      setRGB(true, true, false);
+      digitalWrite(PIN_BUZZER, LOW);
+      break;
+    case 2:  // CRITICO -> rojo + buzzer
+      setRGB(true, false, false);
+      digitalWrite(PIN_BUZZER, HIGH);
+      break;
+  }
 }
 
 // ===================== SETUP =====================
@@ -161,19 +190,19 @@ void setup() {
   Serial.println(F("\n=== Nodo Sensor Rack - DataGuard ==="));
 
   // Pines de salida
-  pinMode(PIN_LED_V, OUTPUT);
-  pinMode(PIN_LED_A, OUTPUT);
   pinMode(PIN_LED_R, OUTPUT);
+  pinMode(PIN_LED_G, OUTPUT);
+  pinMode(PIN_LED_B, OUTPUT);
   pinMode(PIN_BUZZER, OUTPUT);
   digitalWrite(PIN_BUZZER, LOW);
+  setRGB(false, false, false);   // apagar LED al inicio
 
-  // Test rapido de LEDs al arrancar (secuencia visual)
-  digitalWrite(PIN_LED_V, HIGH); delay(200);
-  digitalWrite(PIN_LED_A, HIGH); delay(200);
-  digitalWrite(PIN_LED_R, HIGH); delay(200);
-  digitalWrite(PIN_LED_V, LOW);
-  digitalWrite(PIN_LED_A, LOW);
-  digitalWrite(PIN_LED_R, LOW);
+  // Test rapido del LED RGB al arrancar (verde -> amarillo -> rojo -> azul)
+  setRGB(false, true, false);  delay(400);   // verde
+  setRGB(true,  true, false);  delay(400);   // amarillo
+  setRGB(true,  false,false);  delay(400);   // rojo
+  setRGB(false, false,true);   delay(400);   // azul (solo prueba)
+  setRGB(false, false,false);                // apagar
 
   // Sensores
   dht.begin();
@@ -212,7 +241,7 @@ void loop() {
 
     // Validar DHT22
     if (isnan(temp) || isnan(hum)) {
-      Serial.println(F("ERROR: lectura DHT22 invalida (NaN). Revisa pin D0 -> prueba D3/D4."));
+      Serial.println(F("ERROR: lectura DHT22 invalida (NaN)"));
       lcd->clear();
       lcd->setCursor(0, 0);
       lcd->print(F("Error sensor"));

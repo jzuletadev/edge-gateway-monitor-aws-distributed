@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataGuard · Monitoreo Rack</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0a0e14;
+    --panel:#121821;
+    --panel-edge:#1e2733;
+    --ink:#e6edf3;
+    --ink-dim:#7d8b9a;
+    --grid:#1a222d;
+    --ok:#3fb950;
+    --warn:#d29922;
+    --crit:#f85149;
+    --temp:#ff7b54;
+    --hum:#58a6ff;
+    --smoke:#bc8cff;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--mono);
+    padding:24px;
+    min-height:100vh;
+  }
+  .wrap{max-width:1100px;margin:0 auto}
+
+  /* Header */
+  header{
+    display:flex;align-items:baseline;justify-content:space-between;
+    border-bottom:1px solid var(--panel-edge);
+    padding-bottom:16px;margin-bottom:24px;flex-wrap:wrap;gap:8px;
+  }
+  .brand{display:flex;align-items:baseline;gap:12px}
+  .brand h1{font-size:18px;font-weight:600;letter-spacing:0.5px}
+  .brand .sub{color:var(--ink-dim);font-size:12px;letter-spacing:1px;text-transform:uppercase}
+  .clock{color:var(--ink-dim);font-size:12px}
+  .clock b{color:var(--ink)}
+
+  /* Status banner */
+  .status{
+    display:flex;align-items:center;gap:14px;
+    background:var(--panel);border:1px solid var(--panel-edge);
+    border-left-width:3px;border-radius:6px;
+    padding:14px 18px;margin-bottom:20px;
+    transition:border-color .3s;
+  }
+  .status.ok{border-left-color:var(--ok)}
+  .status.warn{border-left-color:var(--warn)}
+  .status.crit{border-left-color:var(--crit)}
+  .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+  .status.ok .dot{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+  .status.warn .dot{background:var(--warn);box-shadow:0 0 10px var(--warn)}
+  .status.crit .dot{background:var(--crit);box-shadow:0 0 12px var(--crit);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.4}}
+  .status .label{font-size:14px;font-weight:600;letter-spacing:.5px}
+  .status .detail{color:var(--ink-dim);font-size:12px;margin-left:auto}
+
+  /* Metric cards */
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px}
+  @media(max-width:720px){.cards{grid-template-columns:1fr}}
+  .card{
+    background:var(--panel);border:1px solid var(--panel-edge);
+    border-radius:6px;padding:18px 20px;position:relative;overflow:hidden;
+  }
+  .card .name{color:var(--ink-dim);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px}
+  .card .value{font-size:38px;font-weight:600;line-height:1}
+  .card .unit{font-size:16px;color:var(--ink-dim);font-weight:400}
+  .card .accent{position:absolute;top:0;left:0;width:3px;height:100%}
+  .card.t .accent{background:var(--temp)} .card.t .value{color:var(--temp)}
+  .card.h .accent{background:var(--hum)}  .card.h .value{color:var(--hum)}
+  .card.s .accent{background:var(--smoke)}.card.s .value{color:var(--smoke)}
+
+  /* Chart panels */
+  .charts{display:grid;gap:16px}
+  .chartbox{
+    background:var(--panel);border:1px solid var(--panel-edge);
+    border-radius:6px;padding:18px 20px;
+  }
+  .chartbox h3{font-size:11px;color:var(--ink-dim);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px;font-weight:600}
+  .chartbox .cv{height:200px}
+
+  footer{margin-top:24px;color:var(--ink-dim);font-size:11px;text-align:center;letter-spacing:.5px}
+  .err{color:var(--crit)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>DataGuard</h1>
+      <span class="sub">Rack · nodo-rack-01</span>
+    </div>
+    <div class="clock">Última lectura <b id="lastSeen">—</b></div>
+  </header>
+
+  <div class="status ok" id="statusBar">
+    <span class="dot"></span>
+    <span class="label" id="statusLabel">Conectando…</span>
+    <span class="detail" id="statusDetail">Cargando datos del nodo</span>
+  </div>
+
+  <div class="cards">
+    <div class="card t"><div class="accent"></div>
+      <div class="name">Temperatura</div>
+      <div class="value"><span id="vTemp">—</span><span class="unit"> °C</span></div>
+    </div>
+    <div class="card h"><div class="accent"></div>
+      <div class="name">Humedad</div>
+      <div class="value"><span id="vHum">—</span><span class="unit"> %</span></div>
+    </div>
+    <div class="card s"><div class="accent"></div>
+      <div class="name">Humo (MQ-2)</div>
+      <div class="value"><span id="vSmoke">—</span><span class="unit"> raw</span></div>
+    </div>
+  </div>
+
+  <div class="charts">
+    <div class="chartbox"><h3>Temperatura — últimas lecturas</h3><div class="cv"><canvas id="chTemp"></canvas></div></div>
+    <div class="chartbox"><h3>Humedad — últimas lecturas</h3><div class="cv"><canvas id="chHum"></canvas></div></div>
+    <div class="chartbox"><h3>Humo — últimas lecturas</h3><div class="cv"><canvas id="chSmoke"></canvas></div></div>
+  </div>
+
+  <footer>Actualización automática cada 15 s · DataGuard Servicios Tecnológicos</footer>
+</div>
+
+<script>
+  // ====== CONFIG ======
+  const API_URL = "https://qnb8zabrlj.execute-api.us-east-2.amazonaws.com/lecturas";
+  const REFRESH_MS = 15000;
+
+  // Umbrales (deben reflejar los del nodo)
+  const TEMP_WARN = 26, TEMP_CRIT = 30;
+  const SMOKE_WARN = 300, SMOKE_CRIT = 450;
+  const HUM_WARN = 70;
+
+  // ====== Charts ======
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const baseOpts = (color)=>({
+    type:'line',
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      animation:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:css('--ink-dim'),maxTicksLimit:6,font:{size:10}},grid:{color:css('--grid')}},
+        y:{ticks:{color:css('--ink-dim'),font:{size:10}},grid:{color:css('--grid')}}
+      },
+      elements:{point:{radius:0},line:{borderWidth:2,tension:.3}}
+    },
+    data:{labels:[],datasets:[{data:[],borderColor:color,backgroundColor:color+'22',fill:true}]}
+  });
+
+  const chTemp = new Chart(document.getElementById('chTemp'), baseOpts(css('--temp')));
+  const chHum  = new Chart(document.getElementById('chHum'),  baseOpts(css('--hum')));
+  const chSmoke= new Chart(document.getElementById('chSmoke'),baseOpts(css('--smoke')));
+
+  // ====== Estado ======
+  function evaluar(temp,hum,smoke){
+    if(temp>=TEMP_CRIT || smoke>=SMOKE_CRIT) return {cls:'crit',label:'CRÍTICO',detail:'Umbral crítico excedido'};
+    if(temp>=TEMP_WARN || smoke>=SMOKE_WARN || hum>=HUM_WARN) return {cls:'warn',label:'ADVERTENCIA',detail:'Una variable fuera de rango'};
+    return {cls:'ok',label:'NORMAL',detail:'Todas las variables en rango'};
+  }
+
+  function horaCorta(iso){
+    const d = new Date(iso);
+    return d.toLocaleTimeString('es-GT',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+
+  async function actualizar(){
+    try{
+      const r = await fetch(API_URL,{cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const data = await r.json();
+      if(!Array.isArray(data) || data.length===0) throw new Error('sin datos');
+
+      // labels y series
+      const labels = data.map(d=>horaCorta(d.ts_utc));
+      chTemp.data.labels = labels; chTemp.data.datasets[0].data = data.map(d=>d.temp);
+      chHum.data.labels  = labels; chHum.data.datasets[0].data  = data.map(d=>d.hum);
+      chSmoke.data.labels= labels; chSmoke.data.datasets[0].data= data.map(d=>d.smoke);
+      chTemp.update(); chHum.update(); chSmoke.update();
+
+      // ultimo valor
+      const last = data[data.length-1];
+      document.getElementById('vTemp').textContent  = last.temp;
+      document.getElementById('vHum').textContent   = last.hum;
+      document.getElementById('vSmoke').textContent = last.smoke;
+      document.getElementById('lastSeen').textContent = horaCorta(last.ts_utc);
+
+      // estado
+      const st = evaluar(last.temp,last.hum,last.smoke);
+      const bar = document.getElementById('statusBar');
+      bar.className = 'status '+st.cls;
+      document.getElementById('statusLabel').textContent = st.label;
+      document.getElementById('statusDetail').textContent = st.detail;
+
+    }catch(e){
+      const bar = document.getElementById('statusBar');
+      bar.className = 'status crit';
+      document.getElementById('statusLabel').textContent = 'SIN CONEXIÓN';
+      document.getElementById('statusDetail').innerHTML = '<span class="err">No se pudo leer el API: '+e.message+'</span>';
+    }
+  }
+
+  actualizar();
+  setInterval(actualizar, REFRESH_MS);
+</script>
+</body>
+</html>
