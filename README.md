@@ -232,8 +232,6 @@ docker run -d \
   eclipse-mosquitto:2
 
 # 3) Bridge
-#    LOCAL_BROKER debe ser el NOMBRE DEL CONTENEDOR de Mosquitto
-#    (con docker run es 'dataguard-mosquitto', NO 'mosquitto').
 docker run -d \
   --name dataguard-bridge \
   --network dataguard-net \

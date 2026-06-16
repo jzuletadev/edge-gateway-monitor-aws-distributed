@@ -72,6 +72,12 @@ const unsigned long INTERVALO_MS = 15000;  // publicar cada 15 s
 
 #define DHTTYPE DHT22
 
+// ICONOS
+byte gota_icon[8] = {B00000, B00100, B00100, B01110, B11111, B11111, B01110, B00000};
+byte termo_icon[8] = {B01110, B01010, B01010, B01010, B01110, B01110, B01110, B01110};
+byte aire_icon[8] = {B01101, B10010, B00000, B01001, B10110, B00000, B01101, B10010};
+byte grado_icon[8] = {B00110, B01001, B01001, B00110, B00000, B00000, B00000, B00000};
+
 // ===================== OBJETOS =====================
 DHT dht(PIN_DHT, DHTTYPE);
 WiFiClient espClient;
@@ -219,6 +225,11 @@ void setup() {
   lcd->setCursor(0, 1);
   lcd->print(F("Iniciando..."));
 
+  lcd->createChar(1, termo_icon);
+  lcd->createChar(2, grado_icon);
+  lcd->createChar(3, gota_icon);
+  lcd->createChar(4, aire_icon);
+  
   // Red
   conectarWiFi();
   mqtt.setServer(MQTT_BROKER, MQTT_PORT);
@@ -259,17 +270,22 @@ void loop() {
     // --- Mostrar en LCD ---
     lcd->clear();
     lcd->setCursor(0, 0);
-    lcd->print(F("T:"));
+    lcd->write(byte(1));
+    lcd->print(F(":"));
     lcd->print(temp, 1);
-    lcd->print(F("C H:"));
+    lcd->write(byte(2));
+    lcd->print(F("C "));
+    lcd->write(byte(3));
+    lcd->print(F(":"));
     lcd->print(hum, 0);
     lcd->print(F("%"));
     lcd->setCursor(0, 1);
-    lcd->print(F("Humo:"));
+    lcd->write(byte(4));
+    lcd->print(F(":"));
     lcd->print(humo);
-    lcd->print(F(" "));
+    lcd->print(F("ppm "));
     lcd->print(etiqueta);
-
+    
     // --- Construir JSON ---
     StaticJsonDocument<192> doc;
     doc["device"] = MQTT_CLIENT_ID;
